@@ -28,77 +28,106 @@ def spider_results(url=None):
     process.start()
     return results
 
-def on_connect(client, userdata, flasgs, rc):
-    if rc==0:
-        print("connected to MQTT OK. Returned code=",rc)
-    else:
-        print("Bad MQTT connection Returned code=",rc)
+# ----- MQTT Call Back functions
+def on_connect(client, userdata, flags, rc):
+    # https://pypi.org/project/paho-mqtt/#on-connect
+    match rc:
+        case 0:
+            print(f"RC = {rc}: Connection Successful.")
+            client.connected_flag=True
+        case 1:
+            print(f"Error Connecting: RC = {rc}: Invalid Protocl Version.")
+            client.loop_stop()
+            sys.exit()
+        case 2:
+            print(f"Error Connecting: RC = {rc}: Invalid Client Identifier.")
+            client.loop_stop()
+            sys.exit()
+        case 3:
+            print(f"Error Connecting: RC = {rc}: Server Unavailable.")
+            client.loop_stop()
+            sys.exit()
+        case 4:
+            print(f"Error Connecting: RC = {rc}: Bad Username or Password.")
+            client.loop_stop()
+            sys.exit()
+        case 5:
+            print(f"Error Connecting: RC = {rc}: Not Authorized.")
+            client.loop_stop()
+            sys.exit()
+        case _:
+            print( f"Error Connection: RC = {rc}: Currently Unused code.")
+            client.loop_stop()
+            sys.exit()
 
 def on_message(client, userdata, message):
-    print("message received " ,str(message.payload.decode("utf-8")))
-    print("message topic=",message.topic)
-    print("message qos=",message.qos)
-    print("message retain flag=",message.retain)
+    message_received=str(message.payload.decode("utf-8"))
+    print(f"Recieved Message from broker: {message_received}")
 
-    # return message
-    q.put(message)
+def on_publish(client, userdata, mid):
+    print("message published." )
 
 def on_subscribe(client, userdata, mid, granted_qos):
     print("Subscribed: " + str(mid) + " " + str(granted_qos))
     client.suback_flag=True
 
+def on_disconnect(client, userdata, rc):
+    print(f"disconnected OK: RC = {rc}")
 
-
-
-SearchUrl = 'https://nextdoornikki.com/hosted/gal/watermellon/1581254'
+# SearchUrl = 'https://nextdoornikki.com/hosted/gal/watermellon/1581254'
 
 if __name__ == '__main__':
+    # process inputs
     parser=argparse.ArgumentParser()
 
-    parser.add_argument("--broker", help="MQ Broker",required=True)
-    parser.add_argument("--readport", help="MQ Read Port",required=True)
+    parser.add_argument("-b","--broker", help="MQ Broker",required=True)
+    parser.add_argument("-p","--port", help="MQ Read Port",required=True)
 
     args=parser.parse_args()
 
-    print("num args = ")
+    print("args: ")
     print(args)
 
+    # assign to local vars
     broker=args.broker
-    # and convert string to int as docker env vars must be string
-    port=int(args.readport)
+    port=int(args.port)
 
-    # initialize message recv queue
-    q = Queue()
+    # Initialize Client 
+    mqtt.Client.connected_flag=False
 
-    mqtt.Client.suback_flag=False
-    client= mqtt.Client()
+    client = mqtt.Client("imgget1") 
 
-    client.on_connect = on_connect
+    # callbacks
+    client.on_connect=on_connect  
+    client.on_publish=on_publish
     client.on_message=on_message
     client.on_subscribe=on_subscribe
-
-    client.connect(broker,port)
+    client.on_disconnect=on_disconnect
     
-    client.loop_start()
-    client.subscribe("/imgscrape/input")
 
-    sleep_count=0
-    while not client.suback_flag: #wait for subscribe to be acknowledged
-        time.sleep(.25)
-        if sleep_count>40: #give up
-            print("Subscribe failure quitting")
-            client.loop_stop()
-            sys.exit()
-        sleep_count+=1
 
-    print("looping...")
-    I = 0
-    while  I >= 10:
-        print( I )
+    print("Connecting to broker ",broker,": ",port)
+    client.connect(broker,port) 
 
-        time.sleep(5) 
+    client.loop_start()   
 
-    client.loop_stop()
+    # Wait for client to connect
+    while not client.connected_flag: 
+        print("Waiting for MQTT Connection.")
+        time.sleep(1)
+    
+    client.subscribe("/imgscrape/input",qos=1)
+
+    # Continue forever (loop_forever is giving me problems)
+    try:
+        while True:
+            time.sleep(1)
+            # print("Retrieving Messages...")
+    except:
+        print("Exception: Stopping")
+        client.loop_stop()
+        client.disconnect()
+    
 
 
 
