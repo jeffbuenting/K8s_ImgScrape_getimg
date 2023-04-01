@@ -24,7 +24,7 @@ def spider_results(url=None):
 
     # running crawler from script: https://docs.scrapy.org/en/latest/topics/practices.html 
     process = CrawlerProcess(get_project_settings())
-    process.crawl(ImgscrapeSpider, url=SearchUrl)
+    process.crawl(ImgscrapeSpider, url=url)
     process.start()
     return results
 
@@ -61,8 +61,11 @@ def on_connect(client, userdata, flags, rc):
             sys.exit()
 
 def on_message(client, userdata, message):
+    # Convert Message to Json object
     message_received=str(message.payload.decode("utf-8"))
     print(f"Recieved Message from broker: {message_received}")
+    msg=json.loads(message_received)
+    q.put(msg)
 
 def on_publish(client, userdata, mid):
     print("message published." )
@@ -91,6 +94,7 @@ if __name__ == '__main__':
     # assign to local vars
     broker=args.broker
     port=int(args.port)
+    retainflag=True
 
     # Initialize Client 
     mqtt.Client.connected_flag=False
@@ -119,10 +123,35 @@ if __name__ == '__main__':
     client.subscribe("/imgscrape/input",qos=1)
 
     # Continue forever (loop_forever is giving me problems)
+    q=Queue()
     try:
         while True:
             time.sleep(1)
             # print("Retrieving Messages...")
+
+            # pulling data from message into queue
+            while not q.empty():
+                message = q.get()
+                if message is None:
+                    continue
+
+                print(f"Scraping site: {message['Url']}")
+                results = []
+                for item in spider_results(message['Url']):
+                    results.append(item['img'])
+
+                if results:
+                    for img in results:
+                        # images found build object and publish to mqtt topic
+                        data = {}
+                        data['img'] = img
+                        data['path'] = message['Path']
+                        jsondata = json.dumps(data)
+
+                        print(f"Image Found, Publishing: {jsondata}")
+
+                        # publish data 
+                        client.publish("/imgscrape/save",jsondata,retain=retainflag,qos=2)
     except:
         print("Exception: Stopping")
         client.loop_stop()
@@ -131,8 +160,3 @@ if __name__ == '__main__':
 
 
 
-    # results = []
-    # for item in spider_results(SearchUrl):
-    #     results.append(item['img'])
-
-    # print(results)
